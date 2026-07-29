@@ -11,22 +11,25 @@ This checklist is the strict implementation order for Version 1. We implement
 and review one item at a time. Every implementation item must include focused
 unit tests before moving to the next item.
 
-- [ ] Establish the development baseline: inspect existing code, preserve public
+- [x] Establish the development baseline: inspect existing code, preserve public
       behavior, define Python 3.13 tooling, test layout, and a test command that
       works in the workspace.
-- [ ] Define and test the CLI contract: thin Typer entry point, configuration
+- [x] Define and test the CLI contract: thin Typer entry point, configuration
       path argument behavior, exit codes, and no business logic.
-- [ ] Implement typed configuration models and custom configuration errors; add
+- [x] Implement typed configuration models and custom configuration errors; add
       exhaustive validation tests for every supported field and invalid input.
-- [ ] Replace the YAML loader with a deterministic `Path`-based loader that
+- [x] Replace the YAML loader with a deterministic `Path`-based loader that
       parses YAML into configuration models; test missing, unreadable, empty,
       malformed, and invalid configuration files.
-- [ ] Finalize URL exception types and implement `validate()`, `normalize()`,
+- [x] Finalize URL exception types and implement `validate()`, `normalize()`,
       `canonicalize()`, and `resolve()` to the declared contract; test normal,
       malformed, edge-case, and idempotency behavior.
-- [ ] Implement the in-memory coordinator frontier, depth tracking, domain
-      filtering, scheduling, and deduplication as small units; test all
-      crawl-state transitions.
+- [ ] Define and test the coordinator's crawl-job contract before implementation:
+      run on EC2; own in-memory crawl state and per-host robots.txt cache;
+      validate/normalize/canonicalize URLs; allow configured domains and their
+      subdomains; enforce depth and robots rules; deduplicate by canonical URL;
+      and enqueue only verified JSON jobs (`url`, `depth`, `parent_url`) to
+      Amazon SQS in batches.
 - [ ] Define fetch result and error models and implement a stateless HTTP
       fetcher with explicit timeouts, user agent, and predictable failures;
       unit-test request construction and response handling with mocked transport.
@@ -58,3 +61,47 @@ unit tests before moving to the next item.
 1. Implement exactly one checklist item.
 2. Run that item's focused tests and relevant quality checks.
 3. Review the change before starting the next item.
+
+## Version 1 AWS operating targets
+
+These settings are the initial Free Tier-friendly targets. They are deployment
+configuration, not coordinator business logic, and will be implemented with the
+AWS integration milestone.
+
+| Setting | Initial value |
+| --- | --- |
+| SQS-to-Lambda batch size | 10 jobs |
+| Lambda maximum concurrency | 10, adjustable to 20 after review |
+| Lambda timeout | 60 seconds |
+| Lambda memory | 512 MB; adjust after benchmarking |
+
+## Coordinator robots.txt policy
+
+The EC2 coordinator, not the stateless Lambda workers, owns robots.txt policy
+management. Before it schedules a URL, it checks the in-memory cache for that
+URL's host. On a cache miss, it downloads and parses `/robots.txt` with Protego,
+caches the policy, and applies it to all later URLs from the same host.
+
+```js
+Coordinator
+
+↓
+
+check robots
+
+↓
+
+allowed?
+
+↓
+
+enqueue
+
+↓
+
+Worker
+
+↓
+
+crawl
+```

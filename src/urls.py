@@ -1,16 +1,11 @@
-"""
-URL utilities for Corpora.
-Every URL that enters the crawler should eventually pass through this module.
-"""
+"""URL utilities for Corpora."""
 
+from ipaddress import ip_address
 from posixpath import normpath
-from urllib.parse import (
-    parse_qsl,
-    urlencode,
-    urljoin,
-    urlparse,
-    urlunparse,
-)
+from re import fullmatch, sub
+from typing import Optional
+from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
+
 
 SUPPORTED_SCHEMES = {"http", "https"}
 
@@ -24,158 +19,116 @@ class UnsupportedSchemeError(Exception):
 
 
 def validate(url: str) -> None:
-    """
-    Validate that a URL is crawlable.
+    """Validate that a URL has a supported scheme and valid hostname.
 
     Raises:
-        InvalidURLException
-        UnsupportedSchemeError
+        InvalidURLException: If the URL is malformed or has no hostname.
+        UnsupportedSchemeError: If the URL scheme is not HTTP or HTTPS.
     """
+    if not url or any(character.isspace() for character in url):
+        raise InvalidURLException("URL must not be empty or contain whitespace.")
 
-    parsed = urlparse(url)
+    try:
+        parsed = urlparse(url)
+        port = parsed.port
+    except ValueError as error:
+        raise InvalidURLException(f"Malformed URL: {url}") from error
 
     if not parsed.scheme:
         raise InvalidURLException("URL is missing a scheme.")
 
     if parsed.scheme.lower() not in SUPPORTED_SCHEMES:
-        raise UnsupportedSchemeError(
-            f"Unsupported scheme: {parsed.scheme}"
-        )
+        raise UnsupportedSchemeError(f"Unsupported scheme: {parsed.scheme}")
 
     if not parsed.hostname:
         raise InvalidURLException("URL is missing a hostname.")
 
+    _validate_hostname(parsed.hostname)
+
+    if port is not None and not 0 < port <= 65535:
+        raise InvalidURLException(f"URL has an invalid port: {port}")
+
 
 def normalize(url: str) -> str:
-    """
-    Normalize superficial URL differences.
-    Does NOT remove fragments or sort query parameters.
-    """
-
+    """Normalize a URL without removing fragments or sorting its query string."""
+    validate(url)
     parsed = urlparse(url)
     scheme = parsed.scheme.lower()
     hostname = parsed.hostname.lower() if parsed.hostname else ""
-    port = parsed.port
+    netloc = _normalized_netloc(parsed.netloc, hostname, parsed.port, scheme)
+    path = _normalize_path(parsed.path)
 
-    if (
-        (scheme == "http" and port == 80)
-        or (scheme == "https" and port == 443)
-    ):
-        port = None
-
-    netloc = hostname
-
-    if port is not None:
-        netloc = f"{hostname}:{port}"
-
-    path = normpath(parsed.path)
-
-    if path == ".":
-        path = "/"
-
-    if not path.startswith("/"):
-        path = "/" + path
-
-    normalized = parsed._replace(
-        scheme=scheme,
-        netloc=netloc,
-        path=path,
-    )
-
-    return urlunparse(normalized)
+    return urlunparse(parsed._replace(scheme=scheme, netloc=netloc, path=path))
 
 
 def canonicalize(url: str) -> str:
-    """
-    Produce a canonical URL suitable for deduplication.
-    """
-
+    """Produce a canonical URL suitable for deduplication."""
+    validate(url)
     parsed = urlparse(url)
-    query = urlencode(sorted(parse_qsl(parsed.query)))
+    query = urlencode(sorted(parse_qsl(parsed.query, keep_blank_values=True)))
 
-    canonical = parsed._replace(
-        query=query,
-        fragment="",
-    )
-
-    return urlunparse(canonical)
+    return urlunparse(parsed._replace(query=query, fragment=""))
 
 
 def resolve(base_url: str, href: str) -> str:
-    """
-    Resolve a relative link against a base URL.
-    """
-
+    """Resolve a relative link against a base URL."""
     return urljoin(base_url, href)
 
-if __name__ == "__main__":
 
-    print("========== validate ==========")
+def _validate_hostname(hostname: str) -> None:
+    """Raise when a hostname is neither a valid IP address nor domain name."""
+    try:
+        ip_address(hostname)
+        return
+    except ValueError:
+        pass
 
-    test_urls = [
-        "https://example.com",
-        "http://example.com",
-        "https://sub.example.com",
-        "ftp://example.com",
-        "mailto:test@example.com",
-        "javascript:alert(1)",
-        "https://",
-        "example.com",
-    ]
+    try:
+        ascii_hostname = hostname.encode("idna").decode("ascii")
+    except UnicodeError as error:
+        raise InvalidURLException(f"Malformed hostname: {hostname}") from error
 
-    for url in test_urls:
-        try:
-            validate(url)
-            print(f"✓ {url}")
-        except Exception as e:
-            print(f"✗ {url} -> {type(e).__name__}: {e}")
+    if len(ascii_hostname) > 253:
+        raise InvalidURLException(f"Malformed hostname: {hostname}")
 
-    print("\n========== normalize ==========")
+    labels = ascii_hostname.rstrip(".").split(".")
+    if not labels or any(
+        not fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?", label)
+        for label in labels
+    ):
+        raise InvalidURLException(f"Malformed hostname: {hostname}")
 
-    normalize_tests = [
-        "HTTPS://Example.COM",
-        "https://example.com:443",
-        "http://example.com:80",
-        "https://example.com:8443",
-        "https://example.com//blog///post",
-        "https://example.com/blog/./python",
-        "https://example.com/blog/../about",
-        "https://example.com",
-    ]
 
-    for url in normalize_tests:
-        print(f"{url}")
-        print(f" -> {normalize(url)}")
-        print()
+def _normalized_netloc(
+    netloc: str,
+    hostname: str,
+    port: Optional[int],
+    scheme: str,
+) -> str:
+    """Rebuild a netloc with normalized host casing and default ports removed."""
+    userinfo, separator, _ = netloc.rpartition("@")
+    authority = f"{userinfo}{separator}" if separator else ""
 
-    print("========== canonicalize ==========")
+    try:
+        ip_address(hostname)
+        host = f"[{hostname}]" if ":" in hostname else hostname
+    except ValueError:
+        host = hostname
 
-    canonical_tests = [
-        "https://example.com?b=1&a=2",
-        "https://example.com/page#section",
-        "https://example.com/page?z=3&a=1#top",
-        "https://example.com?a=2&a=1",
-    ]
+    if (scheme, port) in {("http", 80), ("https", 443)}:
+        port = None
 
-    for url in canonical_tests:
-        print(f"{url}")
-        print(f" -> {canonicalize(url)}")
-        print()
+    if port is None:
+        return f"{authority}{host}"
 
-    print("========== resolve ==========")
+    return f"{authority}{host}:{port}"
 
-    base = "https://example.com/blog/post"
 
-    hrefs = [
-        "/about",
-        "../contact",
-        "./faq",
-        "team.html",
-        "?page=2",
-        "#comments",
-        "https://google.com",
-    ]
+def _normalize_path(path: str) -> str:
+    """Collapse repeated separators and dot segments in an absolute URL path."""
+    normalized_path = normpath(sub(r"/{2,}", "/", path))
 
-    for href in hrefs:
-        print(f"{href}")
-        print(f" -> {resolve(base, href)}")
+    if normalized_path == ".":
+        return "/"
+
+    return normalized_path if normalized_path.startswith("/") else f"/{normalized_path}"
