@@ -84,15 +84,30 @@ management. Before it schedules a URL, it checks the in-memory cache for that
 URL's host. On a cache miss, it downloads and parses `/robots.txt` with Protego,
 caches the policy, and applies it to all later URLs from the same host.
 
-## Redirect and worker-result contract
+## Queue contracts
 
-The SQS crawl request sent by the coordinator remains a small job containing
-`url`, `depth`, and `parent_url`. A worker follows redirects with
-`httpx.Client(follow_redirects=True)`, fetches and parses only the final
-successful page, and returns this richer result to the coordinator/output queue:
+The coordinator creates a minimal Crawl Job for the Crawl Queue. It tells a
+worker what to crawl and contains no robots, visited-state, retry, or storage
+information.
 
 ```json
 {
+  "job_id": "uuid",
+  "crawl_id": "uuid",
+  "url": "https://example.com/page",
+  "depth": 2,
+  "discovered_from": "https://example.com/index",
+  "discovered_at": "2026-07-29T12:00:00Z"
+}
+```
+
+The worker follows redirects and produces one internal `WorkerResult`. It
+contains both processing data and the complete parsed document:
+
+```json
+{
+  "job_id": "...",
+  "crawl_id": "...",
   "requested_url": "https://foo.com",
   "final_url": "https://bar.com",
   "status_code": 200,
@@ -101,17 +116,95 @@ successful page, and returns this richer result to the coordinator/output queue:
     "https://bar.com"
   ],
   "content_type": "text/html",
+  "depth": 2,
+  "document": {
+    "title": "...",
+    "language": "en",
+    "text": "...",
+    "html": "...",
+    "metadata": {
+      "description": "...",
+      "keywords": []
+    }
+  },
   "links": [
     "https://bar.com/about"
   ],
-  "document_s3_key": "raw/2026-07-29/worker-17/output.jsonl"
+  "fetched_at": "2026-07-29T12:00:00Z",
+  "processing_time_ms": 213
 }
 ```
 
-Workers do not decide the meaning of a redirect. When the coordinator receives
-a result, it handles `final_url` exactly as it would any discovered link: it
-checks the allowed domains, canonical-URL deduplication, and crawl depth, then
-schedules it only when those rules allow it.
+The crawler core produces only `WorkerResult`. A small publisher derives two
+component-specific messages from it:
+
+```json
+{
+  "crawl_id": "...",
+  "url": "https://bar.com",
+  "status_code": 200,
+  "depth": 2,
+  "document": { "...": "..." },
+  "fetched_at": "...",
+  "processing_time_ms": 213
+}
+```
+
+The Storage Queue message contains only data required for persistence. The
+Storage Worker converts the document to JSONL, uploads it to S3, and stores
+metadata plus the resulting S3 key in RDS.
+
+```json
+{
+  "job_id": "...",
+  "crawl_id": "...",
+  "requested_url": "https://foo.com",
+  "final_url": "https://bar.com",
+  "parent_depth": 2,
+  "links": ["..."]
+}
+```
+
+The Discovery Queue message contains only scheduling data. The coordinator
+treats `final_url` as a candidate at `parent_depth`, resolves links relative to
+that final URL at the next depth, then applies normalization, canonicalization,
+robots, visited-state, depth, and allowed-domain checks.
+
+## Queue topology and component responsibilities
+
+```text
+                 Crawl Queue
+                      │
+                      ▼
+               Lambda Worker
+          fetch + parse + process
+               │             │
+               ▼             ▼
+        Storage Queue   Discovery Queue
+               │             │
+               ▼             ▼
+        Storage Worker   Coordinator
+         │                 │
+         ├── S3            ├── Robots Cache
+         ├── RDS           ├── Visited Set
+         └── Done          ├── Depth Checks
+                           └── Crawl Queue
+```
+
+- Lambda Worker: fetches, follows redirects, parses successful final pages with
+  BeautifulSoup4, extracts links, and emits structured discovery and storage
+  messages.
+- Storage Worker: consumes the Storage Queue, writes JSONL documents to S3, and
+  records document metadata and the S3 key in RDS.
+- Coordinator: consumes the Discovery Queue and owns the crawl frontier,
+  robots cache, canonical-URL visited set, depth checks, and Crawl Queue
+  scheduling.
+- Queues: absorb bursts and decouple each component from the next processing
+  stage.
+
+The coordinator remains lightweight—it normalizes URLs, checks robots and
+visited state, applies depth rules, and enqueues crawl jobs. It does not fetch
+or parse pages.
 
 ## Storage design
 

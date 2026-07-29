@@ -233,8 +233,27 @@ Responsibilities:
 - enqueue URLs
 - visited set
 - crawl frontier
+- consume discovered URLs from the Discovery Queue
+- enqueue verified crawl jobs to the Crawl Queue
 
 Workers never own crawl state.
+
+The coordinator's work is intentionally lightweight: normalize URLs, check the
+robots cache, query or update the visited set, enforce depth, and enqueue crawl
+jobs. It does not download or parse web pages.
+
+Crawl Queue job contract:
+
+```json
+{
+  "job_id": "uuid",
+  "crawl_id": "uuid",
+  "url": "https://example.com/page",
+  "depth": 2,
+  "discovered_from": "https://example.com/index",
+  "discovered_at": "2026-07-29T12:00:00Z"
+}
+```
 
 When a worker reports a redirect, the coordinator treats the reported final URL
 like any newly discovered URL. It applies allowed-domain checks, canonical URL
@@ -249,32 +268,43 @@ Workers are stateless.
 Responsibilities:
 
 - fetch page
-- parse page
+- parse a successfully fetched final page with BeautifulSoup4
 - extract links
-- send discovered URLs back to coordinator
-- produce parsed documents
+- publish discovered URLs and redirect targets to the Discovery Queue
+- publish parsed document data to the Storage Queue
 
 Workers never modify crawl state.
 
 Workers must follow redirects with `httpx` and record the requested URL, final
 URL, redirect chain, status code, and content type. They parse only a
-successfully fetched final page and return the resulting links and document S3
-key to the coordinator/output queue. Redirect scheduling decisions remain with
-the coordinator.
+successfully fetched final page. Redirect scheduling decisions remain with the
+coordinator. Workers publish links and redirect targets to the Discovery Queue;
+they publish extracted document data to the Storage Queue.
 
 Worker result contract:
 
 ```json
 {
+  "job_id": "...",
+  "crawl_id": "...",
   "requested_url": "...",
   "final_url": "...",
   "status_code": 200,
   "redirect_chain": ["..."],
   "content_type": "text/html",
+  "depth": 2,
+  "document": {"...": "..."},
   "links": ["..."],
-  "document_s3_key": "..."
+  "fetched_at": "...",
+  "processing_time_ms": 213
 }
 ```
+
+The crawler core produces one WorkerResult. A publisher derives the two queue
+messages from it: the Storage Queue receives persistence data only, while the
+Discovery Queue receives `job_id`, `crawl_id`, `requested_url`, `final_url`,
+`parent_depth`, and `links`. The coordinator schedules the final URL at the
+parent depth and resolves links relative to that final URL at the next depth.
 
 ---
 
@@ -290,37 +320,33 @@ Amazon S3
 
 Storage should eventually be isolated behind a Storage interface.
 
+The Storage Worker consumes the Storage Queue. It writes JSONL documents to S3
+and stores metadata, including the resulting S3 key, in RDS.
+
 ---
 
 # Architecture
 
 Version 1 architecture:
 
-CLI
-
-↓
-
-Coordinator
-
-↓
-
-Amazon SQS
-
-↓
-
-Lambda Workers
-
-↓
-
-Output Queue
-
-↓
-
-Storage Worker
-
-↓
-
-RDS + S3
+```text
+                 Crawl Queue
+                      │
+                      ▼
+               Lambda Worker
+          fetch + parse + process
+               │             │
+               ▼             ▼
+        Storage Queue   Discovery Queue
+               │             │
+               ▼             ▼
+        Storage Worker   Coordinator
+         │                 │
+         ├── S3            ├── Robots Cache
+         ├── RDS           ├── Visited Set
+         └── Done          ├── Depth Checks
+                            └── Crawl Queue
+```
 
 Do not introduce Celery, Kafka, Redis, RabbitMQ, or other queue systems.
 
