@@ -46,6 +46,11 @@ Current implementation order:
 9. Distributed Workers
 10. Observability
 
+Current progress:
+
+- Completed: CLI, configuration loader, URL utilities, coordinator.
+- Active: HTTP fetcher.
+
 ---
 
 # Tech Stack
@@ -231,6 +236,10 @@ Responsibilities:
 
 Workers never own crawl state.
 
+When a worker reports a redirect, the coordinator treats the reported final URL
+like any newly discovered URL. It applies allowed-domain checks, canonical URL
+deduplication, and crawl-depth rules before deciding whether to schedule it.
+
 ---
 
 # Workers
@@ -246,6 +255,26 @@ Responsibilities:
 - produce parsed documents
 
 Workers never modify crawl state.
+
+Workers must follow redirects with `httpx` and record the requested URL, final
+URL, redirect chain, status code, and content type. They parse only a
+successfully fetched final page and return the resulting links and document S3
+key to the coordinator/output queue. Redirect scheduling decisions remain with
+the coordinator.
+
+Worker result contract:
+
+```json
+{
+  "requested_url": "...",
+  "final_url": "...",
+  "status_code": 200,
+  "redirect_chain": ["..."],
+  "content_type": "text/html",
+  "links": ["..."],
+  "document_s3_key": "..."
+}
+```
 
 ---
 

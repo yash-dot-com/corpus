@@ -31,8 +31,9 @@ unit tests before moving to the next item.
       and enqueue only verified JSON jobs (`url`, `depth`, `parent_url`) to
       Amazon SQS in batches.
 - [ ] Define fetch result and error models and implement a stateless HTTP
-      fetcher with explicit timeouts, user agent, and predictable failures;
-      unit-test request construction and response handling with mocked transport.
+      fetcher with explicit timeouts, user agent, predictable failures, and
+      `httpx` redirect following; record the requested URL, final URL, redirect
+      chain, status code, and content type with mocked-transport tests.
 - [ ] Implement stateless HTML parsing and link extraction, with document and
       text metadata models; test representative HTML, malformed markup, link
       forms, and extraction boundaries.
@@ -43,8 +44,9 @@ unit tests before moving to the next item.
       and RDS) behind the existing interfaces, without changing core logic;
       test adapters with mocked AWS clients.
 - [ ] Implement stateless worker handlers and message contracts: fetch, parse,
-      return discoveries to the coordinator or output queue, and persist results;
-      test each handler end-to-end with fakes.
+      return the full crawl result to the coordinator or output queue, write
+      documents to S3, and persist metadata; test each handler end-to-end with
+      fakes.
 - [ ] Wire the CLI composition root for the approved local and AWS execution
       paths; add a small, deterministic end-to-end test using fakes only.
 - [ ] Add structured logging, metrics hooks, and failure visibility without
@@ -82,6 +84,35 @@ management. Before it schedules a URL, it checks the in-memory cache for that
 URL's host. On a cache miss, it downloads and parses `/robots.txt` with Protego,
 caches the policy, and applies it to all later URLs from the same host.
 
+## Redirect and worker-result contract
+
+The SQS crawl request sent by the coordinator remains a small job containing
+`url`, `depth`, and `parent_url`. A worker follows redirects with
+`httpx.Client(follow_redirects=True)`, fetches and parses only the final
+successful page, and returns this richer result to the coordinator/output queue:
+
+```json
+{
+  "requested_url": "https://foo.com",
+  "final_url": "https://bar.com",
+  "status_code": 200,
+  "redirect_chain": [
+    "https://foo.com",
+    "https://bar.com"
+  ],
+  "content_type": "text/html",
+  "links": [
+    "https://bar.com/about"
+  ],
+  "document_s3_key": "raw/2026-07-29/worker-17/output.jsonl"
+}
+```
+
+Workers do not decide the meaning of a redirect. When the coordinator receives
+a result, it handles `final_url` exactly as it would any discovered link: it
+checks the allowed domains, canonical-URL deduplication, and crawl depth, then
+schedules it only when those rules allow it.
+
 ## Storage design
 
 Workers write large document payloads as JSON Lines (JSONL) files to Amazon S3.
@@ -109,6 +140,8 @@ to the corresponding S3 object key.
 This keeps large corpus data inexpensive in S3 while RDS provides queryable
 metadata and document-location tracking.
 
+"https://youtu.be/CEj0yyubNgQ?si=piY45t-zrD5IriLI"
+
 ```js
 Coordinator
 
@@ -132,3 +165,6 @@ Worker
 
 crawl
 ```
+
+### handling the redirect edge case 
+- 
