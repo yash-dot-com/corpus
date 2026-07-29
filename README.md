@@ -24,7 +24,7 @@ unit tests before moving to the next item.
 - [x] Finalize URL exception types and implement `validate()`, `normalize()`,
       `canonicalize()`, and `resolve()` to the declared contract; test normal,
       malformed, edge-case, and idempotency behavior.
-- [ ] Define and test the coordinator's crawl-job contract before implementation:
+- [x] Define and test the coordinator's crawl-job contract before implementation:
       run on EC2; own in-memory crawl state and per-host robots.txt cache;
       validate/normalize/canonicalize URLs; allow configured domains and their
       subdomains; enforce depth and robots rules; deduplicate by canonical URL;
@@ -81,6 +81,33 @@ The EC2 coordinator, not the stateless Lambda workers, owns robots.txt policy
 management. Before it schedules a URL, it checks the in-memory cache for that
 URL's host. On a cache miss, it downloads and parses `/robots.txt` with Protego,
 caches the policy, and applies it to all later URLs from the same host.
+
+## Storage design
+
+Workers write large document payloads as JSON Lines (JSONL) files to Amazon S3.
+For example, a worker can produce:
+
+```jsonl
+{"url":"https://example.com/one","title":"Example one"}
+{"url":"https://example.com/two","title":"Example two"}
+{"url":"https://example.com/three","title":"Example three"}
+```
+
+The worker stores that file at a date- and worker-partitioned key such as:
+
+```text
+s3://corpora/raw/2026-07-29/worker-17/output.jsonl
+```
+
+Amazon RDS stores document metadata, not the document text. Its records point
+to the corresponding S3 object key.
+
+| id | url | domain | depth | s3_key | status |
+| --- | --- | --- | ---: | --- | --- |
+| 1 | `https://example.com/...` | `example.com` | 2 | `raw/2026-07-29/worker-17/output.jsonl` | `SUCCESS` |
+
+This keeps large corpus data inexpensive in S3 while RDS provides queryable
+metadata and document-location tracking.
 
 ```js
 Coordinator
