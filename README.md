@@ -233,22 +233,21 @@ to the corresponding S3 object key.
 This keeps large corpus data inexpensive in S3 while RDS provides queryable
 metadata and document-location tracking.
 
-"https://youtu.be/CEj0yyubNgQ?si=piY45t-zrD5IriLI"
 
 ```js
 Coordinator
 
 ↓
 
-check robots
+Check robots.txt
 
 ↓
 
-allowed?
+Allowed?
 
 ↓
 
-enqueue
+Enqueue
 
 ↓
 
@@ -256,8 +255,10 @@ Worker
 
 ↓
 
-crawl
+Crawl
 ```
 
 ### handling the redirect edge case 
-- 
+
+- current version acknowledges the redirects but not chasing them right away.
+- it creates keeps track of redirects in the worker contract & sends it back to the coordinator to sanitize them and avoid redirect cycles. 

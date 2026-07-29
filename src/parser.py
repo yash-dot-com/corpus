@@ -1,5 +1,6 @@
 """HTML parsing and document extraction for Corpora workers."""
 
+import re
 from dataclasses import dataclass
 from typing import Optional
 
@@ -28,8 +29,13 @@ class ParsedDocument:
 
 def parse(html: str) -> ParsedDocument:
     """Parse HTML into clean document content, metadata, and raw links."""
-    soup = BeautifulSoup(html, "lxml")
+    parser = "html.parser" if _looks_malformed_title(html) else "lxml"
+    soup = BeautifulSoup(html, parser)
+
     title = _tag_text(soup.title)
+    if title is None or _looks_malformed_title(html):
+        title = _recover_title(html)
+
     language = soup.html.get("lang") if soup.html else None
     metadata = DocumentMetadata(
         description=_meta_content(soup, "description"),
@@ -48,6 +54,32 @@ def parse(html: str) -> ParsedDocument:
         metadata=metadata,
         links=links,
     )
+
+
+def _looks_malformed_title(html: str) -> bool:
+    """Return whether a title tag appears to be never closed before the next markup."""
+    title_open = re.search(r"<title\b[^>]*>", html, flags=re.IGNORECASE)
+    if title_open is None:
+        return False
+
+    title_body = html[title_open.end() :]
+    if re.search(r"</title\b[^>]*>", title_body, flags=re.IGNORECASE):
+        return False
+
+    return True
+
+
+def _recover_title(html: str) -> Optional[str]:
+    """Recover a title from malformed HTML when the parser consumes too much."""
+    match = re.search(r"<title\s*>(.*?)</title\s*>", html, flags=re.IGNORECASE | re.DOTALL)
+    if match is None:
+        match = re.search(r"<title\s*>(.*?)<", html, flags=re.IGNORECASE | re.DOTALL)
+
+    if match is None:
+        return None
+
+    title = re.sub(r"\s+", " ", match.group(1)).strip()
+    return title or None
 
 
 def _tag_text(tag: object) -> Optional[str]:
