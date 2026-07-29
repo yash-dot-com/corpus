@@ -4,7 +4,8 @@ These tests intentionally precede the coordinator implementation.
 """
 
 import json
-from typing import Optional
+from datetime import datetime, timezone
+from typing import Callable, Optional
 from pathlib import Path
 from src.config_models import CrawlConfiguration
 from src.coordinator import Coordinator
@@ -48,6 +49,7 @@ def build_configuration(max_depth: int = 2) -> CrawlConfiguration:
 def build_coordinator(
     max_depth: int = 2,
     robots_document: str = "User-agent: *\nAllow: /\n",
+    job_id_factory: Optional[Callable[[], str]] = None,
 ) -> tuple[Coordinator, FakeCrawlJobQueue, FakeRobotsDownloader]:
     """Create a coordinator with isolated queue and robots dependencies."""
     queue = FakeCrawlJobQueue()
@@ -56,6 +58,9 @@ def build_coordinator(
         configuration=build_configuration(max_depth),
         job_queue=queue,
         robots_downloader=robots_downloader,
+        crawl_id="crawl-123",
+        job_id_factory=job_id_factory or (lambda: "job-123"),
+        clock=lambda: datetime(2026, 7, 29, 12, 0, tzinfo=timezone.utc),
     )
     return coordinator, queue, robots_downloader
 
@@ -69,10 +74,14 @@ def schedule(
     coordinator: Coordinator,
     url: str,
     depth: int,
-    parent_url: Optional[str],
+    discovered_from: Optional[str],
 ) -> bool:
     """Schedule a candidate URL through the coordinator's public API."""
-    return coordinator.schedule(url=url, depth=depth, parent_url=parent_url)
+    return coordinator.schedule(
+        url=url,
+        depth=depth,
+        discovered_from=discovered_from,
+    )
 
 
 def test_coordinator_queues_a_verified_canonical_seed_job() -> None:
@@ -83,7 +92,7 @@ def test_coordinator_queues_a_verified_canonical_seed_job() -> None:
         coordinator,
         "HTTPS://EXAMPLE.COM:443/start?b=2&a=1#intro",
         depth=0,
-        parent_url=None,
+        discovered_from=None,
     )
     coordinator.flush()
 
@@ -91,11 +100,26 @@ def test_coordinator_queues_a_verified_canonical_seed_job() -> None:
     assert robots_downloader.requested_urls == ["https://example.com/robots.txt"]
     assert queued_jobs(queue) == [
         {
+            "job_id": "job-123",
+            "crawl_id": "crawl-123",
             "url": "https://example.com/start?a=1&b=2",
             "depth": 0,
-            "parent_url": None,
+            "discovered_from": None,
+            "discovered_at": "2026-07-29T12:00:00Z",
         }
     ]
+
+
+def test_coordinator_creates_unique_job_ids() -> None:
+    """Each scheduled URL receives its own execution identifier."""
+    job_ids = iter(["job-1", "job-2"])
+    coordinator, queue, _ = build_coordinator(job_id_factory=lambda: next(job_ids))
+
+    assert schedule(coordinator, "https://example.com/first", 0, None)
+    assert schedule(coordinator, "https://example.com/second", 0, None)
+    coordinator.flush()
+
+    assert [job["job_id"] for job in queued_jobs(queue)] == ["job-1", "job-2"]
 
 
 def test_coordinator_allows_configured_domains_and_subdomains() -> None:

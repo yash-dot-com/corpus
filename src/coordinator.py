@@ -2,8 +2,10 @@
 
 import json
 from dataclasses import asdict, dataclass
-from typing import Protocol, Optional
+from datetime import datetime, timezone
+from typing import Callable, Optional, Protocol
 from urllib.parse import urlparse, urlunparse
+from uuid import uuid4
 
 from protego import Protego
 
@@ -19,9 +21,12 @@ class CrawlJob:
     A verified crawl request sent from the coordinator to a worker / enqueued in the SQS queue
     """
 
+    job_id: str
+    crawl_id: str
     url: str
     depth: int
-    parent_url: Optional[str]
+    discovered_from: Optional[str]
+    discovered_at: str
 
     def to_json(self) -> str:
         """Serialize this job into the worker message contract."""
@@ -50,16 +55,27 @@ class Coordinator:
         configuration: CrawlConfiguration,
         job_queue: CrawlJobQueue,
         robots_downloader: RobotsDownloader,
+        crawl_id: str,
+        job_id_factory: Callable[[], str] = lambda: str(uuid4()),
+        clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
     ) -> None:
         """Initialize the coordinator with its configuration and dependencies."""
         self._configuration = configuration
         self._job_queue = job_queue
         self._robots_downloader = robots_downloader
+        self._crawl_id = crawl_id
+        self._job_id_factory = job_id_factory
+        self._clock = clock
         self._visited_urls: set[str] = set()
         self._robots_policies: dict[str, Protego] = {}
         self._pending_jobs: list[CrawlJob] = []
 
-    def schedule(self, url: str, depth: int, parent_url: Optional[str]) -> bool:
+    def schedule(
+        self,
+        url: str,
+        depth: int,
+        discovered_from: Optional[str],
+    ) -> bool:
         """Verify a candidate URL and queue it when it satisfies crawl rules."""
         try:
             validate(url)
@@ -80,7 +96,16 @@ class Coordinator:
             return False
 
         self._visited_urls.add(canonical_url)
-        self._pending_jobs.append(CrawlJob(canonical_url, depth, parent_url))
+        self._pending_jobs.append(
+            CrawlJob(
+                job_id=self._job_id_factory(),
+                crawl_id=self._crawl_id,
+                url=canonical_url,
+                depth=depth,
+                discovered_from=discovered_from,
+                discovered_at=_format_timestamp(self._clock()),
+            )
+        )
 
         if len(self._pending_jobs) == SQS_BATCH_SIZE:
             self._enqueue_pending_jobs()
@@ -127,3 +152,8 @@ class Coordinator:
         job_bodies = [job.to_json() for job in self._pending_jobs]
         self._job_queue.enqueue_batch(job_bodies)
         self._pending_jobs.clear()
+
+
+def _format_timestamp(value: datetime) -> str:
+    """Format a timestamp as a UTC ISO 8601 string for a crawl job."""
+    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
