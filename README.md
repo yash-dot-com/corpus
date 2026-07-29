@@ -5,6 +5,8 @@ generation platform. It generates high-quality web corpora—HTML, cleaned text,
 metadata, and JSONL documents—for downstream applications such as LLM training,
 RAG pipelines, search indexing, analytics, and dataset generation.
 
+<img src="documentation/systemV2.png"> 
+
 ## Implementation checklist
 
 This checklist is the strict implementation order for Version 1. We implement
