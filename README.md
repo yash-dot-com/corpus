@@ -30,7 +30,7 @@ unit tests before moving to the next item.
       subdomains; enforce depth and robots rules; deduplicate by canonical URL;
       and enqueue only verified JSON jobs (`url`, `depth`, `parent_url`) to
       Amazon SQS in batches.
-- [ ] Define fetch result and error models and implement a stateless HTTP
+- [x] Define fetch result and error models and implement a stateless HTTP
       fetcher with explicit timeouts, user agent, predictable failures, and
       `httpx` redirect following; record the requested URL, final URL, redirect
       chain, status code, and content type with mocked-transport tests.
