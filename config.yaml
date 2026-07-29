@@ -1,4 +1,9 @@
-hello:
-  - world
-  - mummy
-  - pappa
+seed_urls:
+  - https://example.com
+
+allowed_domains:
+  - example.com
+
+max_depth: 2
+user_agent: corpora/0.1
+output_directory: ./output
