@@ -3,7 +3,6 @@
 import re
 from dataclasses import dataclass
 from typing import Optional
-
 from bs4 import BeautifulSoup
 
 
@@ -13,6 +12,13 @@ class DocumentMetadata:
 
     description: Optional[str]
     keywords: list[str]
+
+    def to_dict(self) -> dict[str, object]:
+        """Return JSON-ready document metadata."""
+        return {
+            "description": self.description,
+            "keywords": self.keywords,
+        }
 
 
 @dataclass(frozen=True)
@@ -25,6 +31,16 @@ class ParsedDocument:
     html: str
     metadata: DocumentMetadata
     links: list[str]
+
+    def to_dict(self) -> dict[str, object]:
+        """Return the JSON-ready document contract for persistence."""
+        return {
+            "title": self.title,
+            "language": self.language,
+            "text": self.text,
+            "html": self.html,
+            "metadata": self.metadata.to_dict(),
+        }
 
 
 def parse(html: str) -> ParsedDocument:
@@ -43,7 +59,7 @@ def parse(html: str) -> ParsedDocument:
     )
     links = _links(soup)
 
-    for element in soup(["script", "style", "noscript"]):
+    for element in soup(["script", "style", "noscript", "template"]):
         element.decompose()
 
     return ParsedDocument(
@@ -93,7 +109,15 @@ def _tag_text(tag: object) -> Optional[str]:
 
 def _meta_content(soup: BeautifulSoup, name: str) -> Optional[str]:
     """Return a named meta tag's non-empty content value."""
-    tag = soup.find("meta", attrs={"name": name})
+    tag = next(
+        (
+            candidate
+            for candidate in soup.find_all("meta")
+            if isinstance(candidate.get("name"), str)
+            and candidate.get("name").casefold() == name.casefold()
+        ),
+        None,
+    )
     if tag is None:
         return None
 

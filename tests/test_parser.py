@@ -33,6 +33,16 @@ def test_parse_extracts_document_fields_metadata_and_raw_links() -> None:
     assert document.metadata.description == "Corpus generation"
     assert document.metadata.keywords == ["crawling", "datasets", "corpora"]
     assert document.links == ["/about", "https://other.example/page", "#section"]
+    assert document.to_dict() == {
+        "title": "Corpora page",
+        "language": "en",
+        "text": "Corpora page Hello world . About External Section No destination Empty destination",
+        "html": html,
+        "metadata": {
+            "description": "Corpus generation",
+            "keywords": ["crawling", "datasets", "corpora"],
+        },
+    }
 
 
 def test_parse_excludes_non_content_elements_from_clean_text() -> None:
@@ -72,3 +82,23 @@ def test_parse_handles_malformed_html() -> None:
     assert document.language == "en"
     assert "Text" in document.text
     assert document.links == ["/next"]
+
+
+def test_parse_extracts_case_insensitive_metadata_and_visible_unicode_text() -> None:
+    """Metadata names and ordinary Unicode content are preserved consistently."""
+    document = parse(
+        """
+<html LANG="hi">
+  <head>
+    <META NAME="DESCRIPTION" CONTENT="A multilingual page">
+    <META NAME="KEYWORDS" CONTENT=" Hindi, हिंदी , datasets ">
+  </head>
+  <body><!-- ignore me --><p>नमस्ते दुनिया</p></body>
+</html>
+"""
+    )
+
+    assert document.language == "hi"
+    assert document.metadata.description == "A multilingual page"
+    assert document.metadata.keywords == ["Hindi", "हिंदी", "datasets"]
+    assert document.text == "नमस्ते दुनिया"
