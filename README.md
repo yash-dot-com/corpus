@@ -57,7 +57,7 @@ unit tests before moving to the next item.
 - [ ] Run the final quality gate: full unit suite, coverage report at the agreed
       100% threshold, Ruff, mypy, and a clean documented local workflow;
       remediate only failures found.
-- [ ] Update README, configuration examples, and architecture documentation to
+- [x] Update README, configuration examples, and architecture documentation to
       match the implemented, tested system.
 
 ## Review workflow
@@ -75,13 +75,60 @@ application.
 | Variable | Purpose | Example |
 | --- | --- | --- |
 | `CORPORA_CRAWL_QUEUE_URL` | SQS queue receiving verified crawl jobs | `https://sqs.us-east-1.amazonaws.com/123456789012/corpora-crawl` |
+| `CORPORA_STORAGE_QUEUE_URL` | SQS queue receiving persistence messages from crawl workers | `https://sqs.us-east-1.amazonaws.com/123456789012/corpora-storage` |
+| `CORPORA_DISCOVERY_QUEUE_URL` | SQS queue consumed by the coordinator for discovered links | `https://sqs.us-east-1.amazonaws.com/123456789012/corpora-discovery` |
+| `CORPORA_AWS_REGION` | AWS region used by deployment adapters | `us-east-1` |
+| `CORPORA_DOCUMENT_BUCKET` | S3 bucket for JSONL documents | `corpora-dev-documents-abc123` |
+| `CORPORA_DB_HOST` | RDS hostname used by the storage adapter | `corpora-dev-postgres.example.rds.amazonaws.com` |
+| `CORPORA_DB_NAME` | RDS database name | `corpora` |
+| `CORPORA_DB_USER` | RDS database username | `corpora` |
 
 Keep `.env` out of version control; commit only a sanitized `.env.example` if
 additional variables are introduced.
 
-No other environment variable is consumed by the implementation yet. Any new
-runtime or infrastructure variable must be added to this table in the same
-change that introduces it.
+The queue, bucket, and database variables are deployment contract values for
+the AWS adapter entry points. The current local composition root directly
+requires `CORPORA_CRAWL_QUEUE_URL`; the remaining values become required when
+the Lambda/EC2 adapter entry points are deployed. Any new runtime or
+infrastructure variable must be added to this table in the same change that
+introduces it.
+
+Terraform and manual AWS deployment instructions are in
+[`docs/aws-integration-plan.md`](docs/aws-integration-plan.md),
+[`docs/aws-manual-deployment.md`](docs/aws-manual-deployment.md), and
+[`infra/`](infra/).
+
+## Configuration and local workflow
+
+Seed URLs and crawl policy stay in `config.yaml`:
+
+```yaml
+seed_urls:
+  - https://example.com
+allowed_domains:
+  - example.com
+max_depth: 2
+user_agent: corpora/0.1
+output_directory: ./output
+```
+
+Run the CLI with `uv run python -m main config.yaml`. The default
+`.env` file supplies infrastructure settings; pass another file with
+`--env-file` when needed. The deterministic local test suite runs with:
+
+```bash
+uv run --no-cache pytest
+```
+
+The final quality gate also uses `coverage`, `ruff`, and Astral `ty` when those
+development tools are installed:
+
+```bash
+uv run --no-cache coverage run -m pytest
+uv run --no-cache coverage report --fail-under=100
+uv run --no-cache ruff check .
+uv run --no-cache ty check src tests
+```
 
 ## Observability
 
