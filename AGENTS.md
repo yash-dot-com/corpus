@@ -49,8 +49,8 @@ Current implementation order:
 Current progress:
 
 - Completed: CLI, configuration loader, URL utilities, coordinator, HTTP
-  fetcher.
-- Active: HTML parser and WorkerResult model.
+  fetcher, and HTML parser.
+- Active: storage layer.
 
 ---
 

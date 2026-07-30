@@ -36,7 +36,7 @@ unit tests before moving to the next item.
       fetcher with explicit timeouts, user agent, predictable failures, and
       `httpx` redirect following; record the requested URL, final URL, redirect
       chain, status code, and content type with mocked-transport tests.
-- [ ] Implement stateless HTML parsing and link extraction, with document and
+- [x] Implement stateless HTML parsing and link extraction, with document and
       text metadata models; test representative HTML, malformed markup, link
       forms, and extraction boundaries.
 - [ ] Define a minimal storage interface and local test implementation for raw
