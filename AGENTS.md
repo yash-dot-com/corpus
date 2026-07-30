@@ -49,8 +49,9 @@ Current implementation order:
 Current progress:
 
 - Completed: CLI, configuration loader, URL utilities, coordinator, HTTP
-  fetcher, and HTML parser.
-- Active: storage layer.
+  fetcher, HTML parser, storage layer, AWS integration, distributed worker
+  handlers, CLI composition root, and backend-independent observability hooks.
+- Active: final quality checks and documentation verification.
 
 ---
 

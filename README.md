@@ -39,19 +39,19 @@ unit tests before moving to the next item.
 - [x] Implement stateless HTML parsing and link extraction, with document and
       text metadata models; test representative HTML, malformed markup, link
       forms, and extraction boundaries.
-- [ ] Define a minimal storage interface and local test implementation for raw
+- [x] Define a minimal storage interface and local test implementation for raw
       HTML, parsed documents, and metadata; test serialization, paths, and error
       behavior.
-- [ ] Add AWS-facing adapters for the approved Version 1 architecture (SQS, S3,
+- [x] Add AWS-facing adapters for the approved Version 1 architecture (SQS, S3,
       and RDS) behind the existing interfaces, without changing core logic;
       test adapters with mocked AWS clients.
-- [ ] Implement stateless worker handlers and message contracts: fetch, parse,
+- [x] Implement stateless worker handlers and message contracts: fetch, parse,
       return the full crawl result to the coordinator or output queue, write
       documents to S3, and persist metadata; test each handler end-to-end with
       fakes.
-- [ ] Wire the CLI composition root for the approved local and AWS execution
+- [x] Wire the CLI composition root for the approved local and AWS execution
       paths; add a small, deterministic end-to-end test using fakes only.
-- [ ] Add structured logging, metrics hooks, and failure visibility without
+- [x] Add structured logging, metrics hooks, and failure visibility without
       coupling domain logic to infrastructure; test emitted events and error
       paths.
 - [ ] Run the final quality gate: full unit suite, coverage report at the agreed
@@ -65,6 +65,31 @@ unit tests before moving to the next item.
 1. Implement exactly one checklist item.
 2. Run that item's focused tests and relevant quality checks.
 3. Review the change before starting the next item.
+
+## Environment variables
+
+Runtime and infrastructure settings belong in a local `.env` file and are not
+part of `config.yaml`. The CLI reads these values when composing the AWS-backed
+application.
+
+| Variable | Purpose | Example |
+| --- | --- | --- |
+| `CORPORA_CRAWL_QUEUE_URL` | SQS queue receiving verified crawl jobs | `https://sqs.us-east-1.amazonaws.com/123456789012/corpora-crawl` |
+
+Keep `.env` out of version control; commit only a sanitized `.env.example` if
+additional variables are introduced.
+
+No other environment variable is consumed by the implementation yet. Any new
+runtime or infrastructure variable must be added to this table in the same
+change that introduces it.
+
+## Observability
+
+Workers expose backend-independent metrics hooks and structured JSON logging.
+The default hooks are optional, so crawling remains decoupled from a metrics or
+logging vendor. Worker executions increment `worker.jobs.started`,
+`worker.jobs.succeeded`, and `worker.jobs.failed`; completion and failure events
+include the job ID and are emitted through the standard Python logger.
 
 ## Version 1 AWS operating targets
 

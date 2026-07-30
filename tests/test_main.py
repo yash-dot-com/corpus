@@ -17,19 +17,38 @@ def test_crawl_loads_configuration_from_required_path(
     """The CLI delegates the supplied path to the configuration loader."""
     config_path = tmp_path / "config.yaml"
     loaded_paths: list[Path] = []
-    configuration = {"seed_urls": ["https://example.com"]}
+    configuration = type(
+        "Configuration",
+        (),
+        {"seed_urls": ["https://example.com"]},
+    )()
+    scheduled_urls: list[tuple[str, int, object]] = []
 
-    def load_test_configuration(path: Path) -> dict[str, list[str]]:
+    class FakeCoordinator:
+        def schedule(self, url: str, depth: int, discovered_from: object) -> bool:
+            scheduled_urls.append((url, depth, discovered_from))
+            return True
+
+        def flush(self) -> None:
+            pass
+
+    def load_test_configuration(path: Path) -> object:
         loaded_paths.append(path)
         return configuration
 
     monkeypatch.setattr(main, "load_config", load_test_configuration)
+    monkeypatch.setattr(main, "load_dotenv", lambda path: {})
+    monkeypatch.setattr(
+        main,
+        "compose_coordinator",
+        lambda config, env, crawl_id: FakeCoordinator(),
+    )
 
     result = runner.invoke(main.app, [str(config_path)])
 
     assert result.exit_code == 0
     assert loaded_paths == [config_path]
-    assert result.stdout == f"{configuration}\n"
+    assert scheduled_urls == [("https://example.com", 0, None)]
 
 
 def test_crawl_requires_configuration_path() -> None:
