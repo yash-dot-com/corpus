@@ -107,7 +107,12 @@ resource "aws_security_group" "storage_worker" {
   name_prefix = "${local.name}-storage-"
   description = "Storage worker to RDS access"
   vpc_id      = data.aws_vpc.default.id
-  egress { protocol = "-1"; from_port = 0; to_port = 0; cidr_blocks = ["0.0.0.0/0"] }
+  egress {
+    protocol    = "-1"
+    from_port   = 0
+    to_port     = 0
+    cidr_blocks = ["0.0.0.0/0"]
+  }
 }
 
 resource "aws_vpc_endpoint" "s3" {
@@ -155,7 +160,7 @@ resource "aws_db_instance" "postgres" {
 resource "aws_iam_role" "lambda" {
   name = "${local.name}-lambda-role"
   assume_role_policy = jsonencode({
-    Version = "2012-10-17"
+    Version   = "2012-10-17"
     Statement = [{ Effect = "Allow", Principal = { Service = "lambda.amazonaws.com" }, Action = "sts:AssumeRole" }]
   })
 }
@@ -202,20 +207,23 @@ resource "aws_lambda_function" "storage_worker" {
   source_code_hash = filebase64sha256(var.storage_worker_package)
   timeout          = 60
   memory_size      = 512
-  vpc_config { subnet_ids = data.aws_subnets.default.ids; security_group_ids = [aws_security_group.storage_worker.id] }
+  vpc_config {
+    subnet_ids         = data.aws_subnets.default.ids
+    security_group_ids = [aws_security_group.storage_worker.id]
+  }
   environment { variables = { CORPORA_DOCUMENT_BUCKET = aws_s3_bucket.documents.bucket, CORPORA_DB_HOST = aws_db_instance.postgres.address, CORPORA_DB_NAME = aws_db_instance.postgres.db_name, CORPORA_DB_USER = var.db_username } }
 }
 
 resource "aws_lambda_event_source_mapping" "crawl" {
   event_source_arn                   = aws_sqs_queue.crawl.arn
-  function_name                       = aws_lambda_function.crawl_worker.arn
-  batch_size                          = 10
-  maximum_batching_window_in_seconds  = 5
-  function_response_types             = ["ReportBatchItemFailures"]
+  function_name                      = aws_lambda_function.crawl_worker.arn
+  batch_size                         = 10
+  maximum_batching_window_in_seconds = 5
+  function_response_types            = ["ReportBatchItemFailures"]
 }
 
 resource "aws_lambda_event_source_mapping" "storage" {
-  event_source_arn                  = aws_sqs_queue.storage.arn
+  event_source_arn                   = aws_sqs_queue.storage.arn
   function_name                      = aws_lambda_function.storage_worker.arn
   batch_size                         = 10
   maximum_batching_window_in_seconds = 5
@@ -223,7 +231,7 @@ resource "aws_lambda_event_source_mapping" "storage" {
 }
 
 resource "aws_iam_role" "coordinator" {
-  name = "${local.name}-coordinator-role"
+  name               = "${local.name}-coordinator-role"
   assume_role_policy = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Principal = { Service = "ec2.amazonaws.com" }, Action = "sts:AssumeRole" }] })
 }
 
@@ -245,7 +253,12 @@ resource "aws_iam_instance_profile" "coordinator" {
 resource "aws_security_group" "coordinator" {
   name_prefix = "${local.name}-coordinator-"
   vpc_id      = data.aws_vpc.default.id
-  egress { protocol = "-1"; from_port = 0; to_port = 0; cidr_blocks = ["0.0.0.0/0"] }
+  egress {
+    protocol    = "-1"
+    from_port   = 0
+    to_port     = 0
+    cidr_blocks = ["0.0.0.0/0"]
+  }
 }
 
 resource "aws_instance" "coordinator" {
@@ -255,12 +268,12 @@ resource "aws_instance" "coordinator" {
   iam_instance_profile        = aws_iam_instance_profile.coordinator.name
   vpc_security_group_ids      = [aws_security_group.coordinator.id]
   associate_public_ip_address = true
-  user_data = <<-USERDATA
+  user_data                   = <<-USERDATA
     #!/bin/bash
     echo CORPORA_CRAWL_QUEUE_URL=${aws_sqs_queue.crawl.url} > /etc/corpora.env
     echo CORPORA_DISCOVERY_QUEUE_URL=${aws_sqs_queue.discovery.url} >> /etc/corpora.env
     echo CORPORA_AWS_REGION=${var.aws_region} >> /etc/corpora.env
     echo "Install the versioned coordinator artifact and systemd service before starting the crawl."
   USERDATA
-  tags = { Name = "${local.name}-coordinator" }
+  tags                        = { Name = "${local.name}-coordinator" }
 }

@@ -98,6 +98,48 @@ Terraform and manual AWS deployment instructions are in
 [`docs/aws-manual-deployment.md`](docs/aws-manual-deployment.md), and
 [`infra/`](infra/).
 
+## Terraform deployment workflow
+
+Terraform is the infrastructure-as-code layer for Corpora. The `.tf` files
+describe the desired AWS resources, Terraform compares that description with
+its state and AWS, and then applies only the required changes.
+
+The deployment sequence is:
+
+1. Configure AWS credentials and choose a region with permission to create SQS,
+   Lambda, S3, RDS, EC2, IAM, and VPC resources.
+2. Build the crawl-worker Lambda, storage-worker Lambda, and coordinator
+   artifacts. Terraform provisions infrastructure; it does not create missing
+   application handlers.
+3. Copy `infra/terraform.tfvars.example` to `infra/terraform.tfvars`, set the
+   artifact paths and deployment values, and provide the database password via
+   `TF_VAR_db_password` or Secrets Manager.
+4. Initialize and check the configuration:
+
+   ```bash
+   cd infra
+   terraform init
+   terraform fmt -recursive
+   terraform validate
+   ```
+
+5. Review the proposed changes with `terraform plan`, then explicitly approve
+   them with `terraform apply`.
+6. Read queue URLs, the document bucket, database endpoint, and coordinator
+   instance ID using `terraform output`.
+7. Run database migrations, configure the coordinator `.env`, start its service,
+   and verify the Crawl Queue → Lambda → Storage/Discovery Queue cycle.
+
+Terraform records managed resources in its state. Do not delete or manually edit
+that state; a shared deployment should use an encrypted S3 backend with state
+locking. Run `terraform plan` before future changes and use `terraform destroy`
+only after exporting required S3 and RDS data.
+
+The current repository intentionally stops before `terraform apply`: the Lambda
+adapter handlers and long-running coordinator Discovery Queue consumer still
+need to be implemented and packaged. This prevents provisioning resources that
+cannot execute the complete application yet.
+
 ## Configuration and local workflow
 
 Seed URLs and crawl policy stay in `config.yaml`:
